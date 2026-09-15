@@ -16,6 +16,7 @@ var display_name: String = "Building"
 var _flag: Node3D
 var _flag_cloth: CSGBox3D
 var _roof: Marker3D
+var _crumbling: bool = false
 
 
 func build(p_id: int, size: Vector3, floors: int, p_slots: int, color: Color, p_name: String) -> void:
@@ -142,7 +143,7 @@ func _refresh_flag() -> void:
 
 
 func take_damage(amount: float) -> void:
-	if amount <= 0.0 or hp <= 0.0:
+	if amount <= 0.0 or hp <= 0.0 or _crumbling:
 		return
 	if not GameSession.is_server():
 		return
@@ -157,11 +158,11 @@ func _rpc_state(p_hp: float, p_owner: int) -> void:
 	hp = p_hp
 	owner_id = p_owner
 	_refresh_flag()
-	var t := clampf(hp / max_hp, 0.15, 1.0)
-	scale = Vector3(1, t, 1)
 
 
 func _die() -> void:
+	if _crumbling:
+		return
 	_prune()
 	for u in occupants.duplicate():
 		u.eject_from_building(40.0)
@@ -175,5 +176,23 @@ func _die() -> void:
 
 @rpc("authority", "call_local", "reliable")
 func _rpc_free() -> void:
-	Fx.burst(get_tree(), global_position + Vector3(0, building_height * 0.5, 0), Color(0.4, 0.32, 0.22))
-	queue_free()
+	_crumble_into_ground()
+
+
+func _crumble_into_ground() -> void:
+	if _crumbling:
+		return
+	_crumbling = true
+	hp = 0.0
+	collision_layer = 0
+	collision_mask = 0
+	for c in get_children():
+		if c is CollisionShape3D:
+			(c as CollisionShape3D).disabled = true
+	Fx.collapse_smoke(get_tree(), global_position, building_height)
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(self, "global_position:y", global_position.y - building_height - 1.8, 1.15).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property(self, "rotation_degrees:z", randf_range(-14.0, 14.0), 1.15)
+	tw.tween_property(self, "rotation_degrees:x", randf_range(-8.0, 8.0), 1.15)
+	tw.chain().tween_callback(queue_free)

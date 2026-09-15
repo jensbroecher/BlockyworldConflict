@@ -8,7 +8,7 @@ var pathfinder: Pathfinder
 var regions: Array[Dictionary] = [] ## {id, name, min, max, center, owner}
 var spawn_points: Dictionary = {} ## player_id -> Vector3
 var rng := RandomNumberGenerator.new()
-var _hill_blockers: Array[Dictionary] = []
+var hill_defs: Array[Dictionary] = []
 
 var _next_wall := 0
 var _next_building := 0
@@ -16,10 +16,12 @@ var _next_building := 0
 
 func build() -> void:
 	rng.seed = 20260325
+	add_to_group("battle_map")
 	_environment()
 	_ground_and_river()
 	_hills()
 	_bridges()
+	_river_barriers()
 	_setup_pathfinder()
 	_regions()
 	_dotted_lines()
@@ -126,16 +128,42 @@ func _hills() -> void:
 		{"pos": Vector3(30, -6, -22), "r": 11.0, "h": 8.5},
 	]
 	for h in hills:
+		var sx := 1.15
+		var sy: float = (h["h"] / h["r"]) * 0.85
 		var s := CSGSphere3D.new()
 		s.radius = h["r"]
 		s.position = h["pos"]
-		s.scale = Vector3(1.15, (h["h"] / h["r"]) * 0.85, 1.15)
+		s.scale = Vector3(sx, sy, sx)
 		s.material = UnitVisuals.mat(Color(0.36, 0.50, 0.26), 0.0, 0.95)
-		s.use_collision = true
-		s.collision_layer = 1
-		s.collision_mask = 0
+		s.use_collision = false
 		add_child(s)
-		_hill_blockers.append({"pos": Vector3(h["pos"].x, 0, h["pos"].z), "r": h["r"] * 0.42})
+		hill_defs.append({
+			"px": h["pos"].x,
+			"py": h["pos"].y,
+			"pz": h["pos"].z,
+			"rx": h["r"] * sx,
+			"ry": h["r"] * sy,
+			"rz": h["r"] * sx,
+		})
+
+
+func sample_height(x: float, z: float) -> float:
+	var h := 0.0
+	for hill in hill_defs:
+		var dx: float = (x - float(hill["px"])) / float(hill["rx"])
+		var dz: float = (z - float(hill["pz"])) / float(hill["rz"])
+		var d2 := dx * dx + dz * dz
+		if d2 < 0.97:
+			var y: float = float(hill["py"]) + float(hill["ry"]) * sqrt(1.0 - d2)
+			if y > h:
+				h = y
+	return maxf(h, 0.0)
+
+
+func is_on_bridge(pos: Vector3) -> bool:
+	if absf(pos.x) > RIVER_HALF + 3.0:
+		return false
+	return absf(pos.z - 40.0) < 6.6 or absf(pos.z + 40.0) < 6.6
 
 
 func _bridges() -> void:
@@ -143,31 +171,60 @@ func _bridges() -> void:
 		var body := StaticBody3D.new()
 		body.collision_layer = 1
 		body.position = Vector3(0, 0, z)
-		# Floor-height collision so units walk across instead of hitting a wall.
+		# Wide flat floor only — railings are visual and sit outside this volume.
 		var col := CollisionShape3D.new()
 		var box := BoxShape3D.new()
-		box.size = Vector3(RIVER_HALF * 2.0 + 8.0, 1.0, 12.0)
+		box.size = Vector3(RIVER_HALF * 2.0 + 6.0, 1.0, 14.0)
 		col.shape = box
 		col.position.y = -0.5
 		body.add_child(col)
 		var deck := CSGBox3D.new()
-		deck.size = Vector3(RIVER_HALF * 2.0 + 8.0, 0.35, 11.0)
-		deck.position.y = 0.05
+		deck.size = Vector3(RIVER_HALF * 2.0 + 6.0, 0.28, 13.5)
+		deck.position.y = 0.04
+		deck.use_collision = false
 		deck.material = UnitVisuals.mat(Color(0.42, 0.32, 0.22), 0.05, 0.8)
 		body.add_child(deck)
 		for side in [-1.0, 1.0]:
 			var rail := CSGBox3D.new()
-			rail.size = Vector3(RIVER_HALF * 2.0 + 8.0, 0.85, 0.28)
-			rail.position = Vector3(0, 0.55, side * 5.4)
+			rail.size = Vector3(RIVER_HALF * 2.0 + 6.0, 0.9, 0.22)
+			rail.position = Vector3(0, 0.55, side * 7.15)
+			rail.use_collision = false
 			rail.material = UnitVisuals.mat(Color(0.3, 0.22, 0.16), 0.1, 0.7)
 			body.add_child(rail)
 		for i in 8:
 			var plank := CSGBox3D.new()
-			plank.size = Vector3(2.2, 0.1, 10.4)
-			plank.position = Vector3(-12.0 + i * 3.4, 0.24, 0)
+			plank.size = Vector3(2.2, 0.08, 12.6)
+			plank.position = Vector3(-11.0 + i * 3.15, 0.2, 0)
+			plank.use_collision = false
 			plank.material = UnitVisuals.mat(Color(0.5, 0.38, 0.24), 0.05, 0.75)
 			body.add_child(plank)
 		add_child(body)
+
+
+func _river_barriers() -> void:
+	# Banks block the water; openings are wider than the deck so units don't clip the ends.
+	var gap := 8.2
+	var spans: Array[Vector2] = [
+		Vector2(-MAP_HALF, -40.0 - gap),
+		Vector2(-40.0 + gap, 40.0 - gap),
+		Vector2(40.0 + gap, MAP_HALF),
+	]
+	for x in [-RIVER_HALF - 0.15, RIVER_HALF + 0.15]:
+		for span in spans:
+			var z0: float = span.x
+			var z1: float = span.y
+			var length := z1 - z0
+			if length < 2.0:
+				continue
+			var wall := StaticBody3D.new()
+			wall.collision_layer = 1
+			wall.position = Vector3(x, 1.2, (z0 + z1) * 0.5)
+			var col := CollisionShape3D.new()
+			var box := BoxShape3D.new()
+			box.size = Vector3(0.9, 2.6, length)
+			col.shape = box
+			wall.add_child(col)
+			add_child(wall)
 
 
 func _setup_pathfinder() -> void:
@@ -183,12 +240,10 @@ func _setup_pathfinder() -> void:
 	)
 	for z in [-40.0, 40.0]:
 		pathfinder.set_blocked_rect(
-			Vector2(-RIVER_HALF - 3.0, z - 6.5),
-			Vector2(RIVER_HALF + 3.0, z + 6.5),
+			Vector2(-RIVER_HALF - 1.5, z - 5.8),
+			Vector2(RIVER_HALF + 1.5, z + 5.8),
 			false
 		)
-	for h in _hill_blockers:
-		pathfinder.set_blocked_world(h["pos"], h["r"], true)
 
 
 func _regions() -> void:

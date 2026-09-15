@@ -31,6 +31,9 @@ var _net_pos: Vector3
 var _net_yaw: float
 var _sync_t: float = 0.0
 var _acquire_t: float = 0.0
+var _crashing: bool = false
+var _crash_spin: Vector3 = Vector3.ZERO
+var _pop_turret_on_wreck: bool = false
 
 
 func setup(p_kind: int, p_owner: int) -> void:
@@ -112,6 +115,14 @@ func _make_hp_bar(ext: Vector3) -> void:
 
 func is_air() -> bool:
 	return bool(stats.get("air", false))
+
+
+func is_infantry() -> bool:
+	return bool(stats.get("can_garrison", false))
+
+
+func is_vehicle() -> bool:
+	return not is_air() and not is_infantry()
 
 
 func aim_point() -> Vector3:
@@ -198,8 +209,21 @@ func _rpc_stop() -> void:
 	_move_priority = false
 
 
+func _map() -> BattleMap:
+	return get_tree().get_first_node_in_group("battle_map") as BattleMap
+
+
+func _ground_y() -> float:
+	var m := _map()
+	if m == null:
+		return 0.08
+	return m.sample_height(global_position.x, global_position.z) + 0.08
+
+
 func _physics_process(delta: float) -> void:
 	if hp <= 0.0:
+		if _crashing:
+			_crash_tick(delta)
 		return
 	_update_hp_bar()
 	if GameSession.is_server():
@@ -235,9 +259,9 @@ func _server_sim(delta: float) -> void:
 		velocity.x = 0.0
 		velocity.z = 0.0
 		if not is_air():
-			if not is_on_floor():
-				velocity.y -= 22.0 * delta
+			velocity.y = 0
 			move_and_slide()
+			global_position.y = _ground_y()
 
 
 func _follow_path(delta: float) -> void:
@@ -257,6 +281,7 @@ func _follow_path(delta: float) -> void:
 			global_position.y = move_toward(global_position.y, target_y, 6.0 * delta)
 			_move_priority = false
 		return
+	var map := _map()
 	if path_i < path.size():
 		var dest: Vector3 = path[path_i]
 		var to := Vector3(dest.x, global_position.y, dest.z) - global_position
@@ -265,18 +290,28 @@ func _follow_path(delta: float) -> void:
 			path_i += 1
 		else:
 			_look_xz(dest)
-			velocity.x = to.normalized().x * speed
-			velocity.z = to.normalized().z * speed
+			var dir := to.normalized()
+			if map:
+				var ahead := global_position + dir * 2.2
+				var slope := (map.sample_height(ahead.x, ahead.z) - map.sample_height(global_position.x, global_position.z)) / 2.2
+				if slope > 0.0:
+					speed *= clampf(1.0 - slope * 2.4, 0.34, 1.0)
+				elif slope < -0.05:
+					speed *= 1.06
+			velocity.x = dir.x * speed
+			velocity.z = dir.z * speed
 	else:
 		velocity.x = 0
 		velocity.z = 0
 		_move_priority = false
-	if not is_on_floor():
-		velocity.y -= 22.0 * delta
-	else:
-		velocity.y = 0
+	velocity.y = 0
+	_keep_out_of_water()
 	_separate()
 	move_and_slide()
+	if map:
+		global_position.y = _ground_y()
+	if GameSession.is_server() and is_vehicle():
+		_try_crush()
 
 
 func _separate() -> void:
@@ -284,11 +319,47 @@ func _separate() -> void:
 		var o := n as Unit
 		if o == null or o == self or o.is_air() != is_air():
 			continue
+		# Vehicles drive through infantry instead of bouncing off them.
+		if is_vehicle() and o.is_infantry():
+			continue
+		if is_infantry() and o.is_vehicle() and o.owner_id != owner_id:
+			continue
 		var d := global_position.distance_to(o.global_position)
 		if d < 2.4 and d > 0.01:
 			var push := (global_position - o.global_position).normalized() * (2.4 - d) * 2.0
 			velocity.x += push.x
 			velocity.z += push.z
+
+
+func _try_crush() -> void:
+	var speed_xz := Vector2(velocity.x, velocity.z).length()
+	if speed_xz < 2.8 and path_i >= path.size():
+		return
+	var ext: Vector3 = stats["extent"]
+	var radius := maxf(ext.x, ext.z) * 0.62
+	for n in get_tree().get_nodes_in_group("units"):
+		var o := n as Unit
+		if o == null or o == self or o.owner_id == owner_id or o.hp <= 0.0:
+			continue
+		if not o.is_infantry() or o.garrison_building:
+			continue
+		var d := Vector2(global_position.x - o.global_position.x, global_position.z - o.global_position.z).length()
+		if d <= radius + 0.7:
+			o.take_damage(o.max_hp + 20.0, owner_id)
+			Fx.crush_puff(get_tree(), o.global_position)
+
+
+func _keep_out_of_water() -> void:
+	if is_air():
+		return
+	var map := _map()
+	var on_bridge := map != null and map.is_on_bridge(global_position)
+	var over_water := absf(global_position.x) < BattleMap.RIVER_HALF - 0.2
+	if global_position.y < -0.35 or (over_water and not on_bridge):
+		var side := 1.0 if global_position.x >= 0.0 else -1.0
+		global_position.x = side * (BattleMap.RIVER_HALF + 1.6)
+		global_position.y = _ground_y()
+		velocity = Vector3.ZERO
 
 
 func _look_xz(dest: Vector3) -> void:
@@ -320,7 +391,7 @@ func _try_shoot(_delta: float) -> bool:
 		return false
 	if dist < minr:
 		return false
-	if not _los_ok(origin, aim):
+	if kind != UnitDB.Kind.ARTILLERY and kind != UnitDB.Kind.MLRS and not _los_ok(origin, aim):
 		return false
 	if _cooldown <= 0.0:
 		_fire(origin, aim)
@@ -373,21 +444,20 @@ func _acquire_enemy() -> Unit:
 
 func _fire(from: Vector3, to: Vector3) -> void:
 	var spd: float = float(stats["projectile_speed"])
-	_cooldown = float(stats["fire_interval"])
+	var rocket := bool(stats.get("rocket", false))
 	if kind == UnitDB.Kind.MLRS:
-		_mlrs_left = 3
-		_cooldown = 0.22
-	rpc("_rpc_shot_fx", from, to)
-	if spd <= 1.0:
-		_hitscan(from, to)
-	else:
-		_spawn_projectile(from, to, spd)
-	if kind == UnitDB.Kind.MLRS and _mlrs_left > 0:
+		if _mlrs_left <= 0:
+			_mlrs_left = 3
 		_mlrs_left -= 1
-		if _mlrs_left > 0:
-			_cooldown = 0.18
-		else:
-			_cooldown = 2.8
+		_cooldown = 0.42 if _mlrs_left > 0 else float(stats["fire_interval"])
+		to += Vector3(randf_range(-2.4, 2.4), 0.0, randf_range(-2.4, 2.4))
+	else:
+		_cooldown = float(stats["fire_interval"])
+	if rocket or spd > 1.0:
+		_spawn_projectile(from, to, spd)
+	else:
+		rpc("_rpc_shot_fx", from, to)
+		_hitscan(from, to)
 
 
 func _hitscan(from: Vector3, to: Vector3) -> void:
@@ -424,6 +494,7 @@ func _rpc_spawn_projectile(from: Vector3, to: Vector3, spd: float) -> void:
 		float(stats["wall_damage"]),
 		float(stats["building_damage"])
 	)
+	p.ignore_rids = [get_rid()]
 	get_tree().current_scene.add_child(p, true)
 
 
@@ -458,13 +529,102 @@ func _die() -> void:
 	if garrison_building:
 		_leave_garrison()
 	died.emit(self)
-	rpc("_rpc_die")
+	rpc("_rpc_die", kind == UnitDB.Kind.TANK and randf() < 0.62)
 
 
 @rpc("authority", "call_local", "reliable")
-func _rpc_die() -> void:
-	Fx.burst(get_tree(), aim_point(), GameSession.color_of(owner_id))
-	queue_free()
+func _rpc_die(pop_turret: bool = false) -> void:
+	hp = 0.0
+	selected = false
+	remove_from_group("units")
+	collision_layer = 0
+	collision_mask = 0
+	var cs := get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if cs:
+		cs.disabled = true
+	_pop_turret_on_wreck = pop_turret
+	if is_air():
+		_start_heli_crash()
+		return
+	_play_wreck()
+	get_tree().create_timer(0.35).timeout.connect(queue_free)
+
+
+func _start_heli_crash() -> void:
+	_crashing = true
+	_crash_spin = Vector3(randf_range(-1.6, 1.6), randf_range(2.5, 4.5), randf_range(-1.2, 1.2))
+	velocity = Vector3(randf_range(-4, 4), -2.0, randf_range(-4, 4))
+	Fx.fire_column(get_tree(), global_position)
+
+
+func _crash_tick(delta: float) -> void:
+	velocity.y -= 22.0 * delta
+	global_position += velocity * delta
+	rotate_x(_crash_spin.x * delta)
+	rotate_y(_crash_spin.y * delta)
+	rotate_z(_crash_spin.z * delta)
+	if Engine.get_physics_frames() % 4 == 0:
+		Fx.burst(get_tree(), global_position, Color(1.0, 0.45, 0.1))
+	var floor_y := _ground_y()
+	if global_position.y <= floor_y + 0.6:
+		_crashing = false
+		Fx.explode(get_tree(), global_position, 9.0)
+		Fx.spawn_debris(get_tree(), global_position, GameSession.color_of(owner_id), 10, 12.0)
+		Fx.fire_column(get_tree(), global_position)
+		queue_free()
+
+
+func _play_wreck() -> void:
+	var pos := aim_point()
+	var col := GameSession.color_of(owner_id)
+	if kind == UnitDB.Kind.TANK:
+		Fx.explode(get_tree(), pos, 8.0)
+		Fx.fire_column(get_tree(), global_position)
+		Fx.spawn_debris(get_tree(), pos, col, 8, 11.0)
+		if _pop_turret_on_wreck:
+			_pop_turret()
+	elif kind == UnitDB.Kind.ARTILLERY or kind == UnitDB.Kind.MLRS:
+		Fx.explode(get_tree(), pos, 7.5)
+		Fx.spawn_debris(get_tree(), pos, col, 7, 10.0)
+		Fx.fire_column(get_tree(), global_position)
+		get_tree().create_timer(0.18).timeout.connect(func() -> void:
+			if is_inside_tree():
+				Fx.explode(get_tree(), global_position + Vector3(randf_range(-1.2, 1.2), 1.0, randf_range(-1.2, 1.2)), 5.0)
+		)
+	elif is_infantry():
+		Fx.burst(get_tree(), pos, col)
+		Fx.spawn_debris(get_tree(), pos, col.darkened(0.2), 5, 7.0)
+	else:
+		Fx.explode(get_tree(), pos, 6.0)
+		Fx.spawn_debris(get_tree(), pos, col, 6, 9.0)
+		Fx.fire_column(get_tree(), global_position)
+
+
+func _pop_turret() -> void:
+	if _turret == null or not is_instance_valid(_turret):
+		return
+	var gpos := _turret.global_position
+	var grot := _turret.global_rotation
+	_visual.remove_child(_turret)
+	var rb := RigidBody3D.new()
+	rb.collision_layer = 0
+	rb.collision_mask = 1
+	rb.mass = 1.4
+	rb.global_position = gpos
+	rb.global_rotation = grot
+	var col := CollisionShape3D.new()
+	var sh := SphereShape3D.new()
+	sh.radius = 1.1
+	col.shape = sh
+	rb.add_child(col)
+	rb.add_child(_turret)
+	_turret.position = Vector3.ZERO
+	_turret.rotation = Vector3.ZERO
+	get_tree().current_scene.add_child(rb)
+	rb.linear_velocity = Vector3(randf_range(-5, 5), randf_range(11, 16), randf_range(-5, 5))
+	rb.angular_velocity = Vector3(randf_range(-6, 6), randf_range(-8, 8), randf_range(-6, 6))
+	_turret = null
+	get_tree().create_timer(3.5).timeout.connect(rb.queue_free)
 
 
 func _try_enter_garrison() -> void:

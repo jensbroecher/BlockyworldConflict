@@ -166,48 +166,85 @@ func show_winner(text: String, color: Color) -> void:
 	_banner.visible = true
 
 
+func _minimap_axes() -> Array[Vector2]:
+	var yaw := 0.0
+	if battle and battle.camera:
+		yaw = deg_to_rad(battle.camera.yaw)
+	# Ground-forward of the RTS camera (screen-up) and screen-right.
+	var look := Vector2(-sin(yaw), -cos(yaw))
+	var right := Vector2(-look.y, look.x)
+	var out: Array[Vector2] = [right, look]
+	return out
+
+
+func _world_to_minimap(p: Vector3) -> Vector2:
+	var half := BattleMap.MAP_HALF
+	var axes := _minimap_axes()
+	var rel := Vector2(p.x, p.z)
+	var u := rel.dot(axes[0]) / (half * 2.0) + 0.5
+	var v := 0.5 - rel.dot(axes[1]) / (half * 2.0)
+	return Vector2(u * _minimap.size.x, v * _minimap.size.y)
+
+
+func _minimap_to_world(screen: Vector2) -> Vector3:
+	var half := BattleMap.MAP_HALF
+	var axes := _minimap_axes()
+	var u := screen.x / _minimap.size.x - 0.5
+	var v := 0.5 - screen.y / _minimap.size.y
+	var rel := axes[0] * (u * half * 2.0) + axes[1] * (v * half * 2.0)
+	return Vector3(rel.x, 0.0, rel.y)
+
+
+func _draw_world_poly(corners: Array, color: Color) -> void:
+	var pts := PackedVector2Array()
+	for c in corners:
+		pts.append(_world_to_minimap(c))
+	if pts.size() >= 3:
+		_minimap.draw_colored_polygon(pts, color)
+
+
 func _draw_minimap() -> void:
 	if battle == null or battle.map == null:
 		return
 	var r := Rect2(Vector2.ZERO, _minimap.size)
 	_minimap.draw_rect(r, Color(0.12, 0.18, 0.1, 0.9))
 	var half := BattleMap.MAP_HALF
-	var to_mm := func(p: Vector3) -> Vector2:
-		var nx := (p.x + half) / (half * 2.0)
-		var nz := (p.z + half) / (half * 2.0)
-		return Vector2(nx * r.size.x, nz * r.size.y)
 	for region in battle.map.regions:
 		var mn: Vector2 = region["min"]
 		var mx: Vector2 = region["max"]
-		var a: Vector2 = to_mm.call(Vector3(mn.x, 0, mn.y))
-		var b: Vector2 = to_mm.call(Vector3(mx.x, 0, mx.y))
-		var rr := Rect2(a, b - a).abs()
 		var owner: int = int(region["owner"])
 		var col := Color(1, 1, 1, 0.08)
 		if owner != 0:
 			col = GameSession.color_of(owner)
 			col.a = 0.28
-		_minimap.draw_rect(rr, col)
-	# River
-	var r0: Vector2 = to_mm.call(Vector3(-8, 0, -half))
-	var r1: Vector2 = to_mm.call(Vector3(8, 0, half))
-	_minimap.draw_rect(Rect2(r0, r1 - r0).abs(), Color(0.2, 0.45, 0.7, 0.7))
+		_draw_world_poly([
+			Vector3(mn.x, 0, mn.y),
+			Vector3(mx.x, 0, mn.y),
+			Vector3(mx.x, 0, mx.y),
+			Vector3(mn.x, 0, mx.y),
+		], col)
+	_draw_world_poly([
+		Vector3(-8, 0, -half),
+		Vector3(8, 0, -half),
+		Vector3(8, 0, half),
+		Vector3(-8, 0, half),
+	], Color(0.2, 0.45, 0.7, 0.7))
 	for n in get_tree().get_nodes_in_group("units"):
 		var u := n as Unit
 		if u == null:
 			continue
-		var p: Vector2 = to_mm.call(u.global_position)
+		var p := _world_to_minimap(u.global_position)
 		var uc := GameSession.color_of(u.owner_id)
 		_minimap.draw_rect(Rect2(p - Vector2(2, 2), Vector2(5, 5)), uc)
-	# Camera
-	var cam_p: Vector2 = to_mm.call(battle.camera.global_position)
-	_minimap.draw_arc(cam_p, 10.0, 0, TAU, 16, Color(1, 1, 1, 0.7), 1.5)
+	if battle.camera:
+		var cam_p := _world_to_minimap(battle.camera.global_position)
+		_minimap.draw_arc(cam_p, 10.0, 0, TAU, 16, Color(1, 1, 1, 0.7), 1.5)
+		var tip := _world_to_minimap(battle.camera.global_position + Vector3(_minimap_axes()[1].x, 0, _minimap_axes()[1].y) * 14.0)
+		_minimap.draw_line(cam_p, tip, Color(1, 1, 1, 0.85), 2.0)
 
 
 func _on_minimap_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		var mb := event as InputEventMouseButton
-		var uv := mb.position / _minimap.size
-		var world := Vector3(uv.x * 192.0 - 96.0, 0, uv.y * 192.0 - 96.0)
 		if battle and battle.camera:
-			battle.camera.focus(world)
+			battle.camera.focus(_minimap_to_world(mb.position))

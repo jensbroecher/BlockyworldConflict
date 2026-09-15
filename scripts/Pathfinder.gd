@@ -14,7 +14,7 @@ func setup(p_origin: Vector2, p_size: Vector2) -> void:
 	grid = AStarGrid2D.new()
 	grid.region = Rect2i(0, 0, int(map_size.x / CELL), int(map_size.y / CELL))
 	grid.cell_size = Vector2(CELL, CELL)
-	grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_AT_LEAST_ONE_WALKABLE
+	grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
 	grid.default_compute_heuristic = AStarGrid2D.HEURISTIC_EUCLIDEAN
 	grid.default_estimate_heuristic = AStarGrid2D.HEURISTIC_EUCLIDEAN
 	grid.update()
