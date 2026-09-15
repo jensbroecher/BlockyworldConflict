@@ -98,11 +98,10 @@ func server_buy_unit(player_id: int, kind: int) -> void:
 	if not GameSession.is_server() or GameSession.match_over:
 		return
 	var cost := UnitDB.cost(kind)
-	if GameSession.get_credits(player_id) < cost:
-		return
 	if _army_count(player_id) >= UnitDB.MAX_ARMY:
 		return
-	GameSession.set_credits(player_id, GameSession.get_credits(player_id) - cost)
+	if not GameSession.try_spend(player_id, cost):
+		return
 	var n := _army_count(player_id)
 	server_spawn_unit(kind, player_id, _slot_pos(player_id, n), 2.2)
 	_sync_economy()
@@ -243,17 +242,21 @@ func _rpc_match_over(winner: int) -> void:
 
 
 func _sync_economy() -> void:
+	if GameSession.mode != GameSession.Mode.MULTIPLAYER:
+		return
 	var ids := GameSession.player_ids()
 	var a := ids[0] if ids.size() > 0 else 1
 	var b := ids[1] if ids.size() > 1 else 0
-	rpc("_rpc_credits", a, GameSession.get_credits(a), b, GameSession.get_credits(b))
+	rpc("_rpc_credits", a, float(GameSession.credits.get(a, 0.0)), b, float(GameSession.credits.get(b, 0.0)))
 
 
-@rpc("authority", "call_local", "unreliable")
-func _rpc_credits(id_a: int, c_a: int, id_b: int, c_b: int) -> void:
-	GameSession.set_credits(id_a, c_a)
+@rpc("authority", "unreliable")
+func _rpc_credits(id_a: int, c_a: float, id_b: int, c_b: float) -> void:
+	if GameSession.is_server():
+		return
+	GameSession.credits[id_a] = c_a
 	if id_b != 0:
-		GameSession.set_credits(id_b, c_b)
+		GameSession.credits[id_b] = c_b
 
 
 func _on_unit_died(u: Unit) -> void:

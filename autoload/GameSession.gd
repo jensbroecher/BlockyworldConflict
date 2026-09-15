@@ -11,7 +11,7 @@ var mode: Mode = Mode.NONE
 var local_id: int = 1
 var ai_id: int = 2
 var player_names: Dictionary = {} ## int -> String
-var credits: Dictionary = {} ## int -> int
+var credits: Dictionary = {} ## int -> float
 var loadouts: Dictionary = {} ## int -> Array[int] kinds
 var ready_flags: Dictionary = {} ## int -> bool
 var region_owners: Dictionary = {} ## String -> int  (0 = neutral)
@@ -117,16 +117,22 @@ func is_skirmish() -> bool:
 
 
 func get_credits(player_id: int) -> int:
-	return int(credits.get(player_id, 0))
+	return int(floor(float(credits.get(player_id, 0.0))))
 
 
 func set_credits(player_id: int, amount: int) -> void:
-	credits[player_id] = max(0, amount)
+	credits[player_id] = float(maxi(0, amount))
 
 
 func add_credits(player_id: int, amount: float) -> void:
-	var cur := float(credits.get(player_id, 0))
-	credits[player_id] = int(cur + amount)
+	credits[player_id] = maxf(0.0, float(credits.get(player_id, 0.0)) + amount)
+
+
+func try_spend(player_id: int, cost: int) -> bool:
+	if get_credits(player_id) < cost:
+		return false
+	credits[player_id] = float(credits.get(player_id, 0.0)) - float(cost)
+	return true
 
 
 func army_value_cap_ok(player_id: int, extra: int) -> bool:
