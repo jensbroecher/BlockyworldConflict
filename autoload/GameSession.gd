@@ -147,6 +147,7 @@ func _ai_pick_loadout() -> void:
 		UnitDB.Kind.SOLDIER_SQUAD,
 		UnitDB.Kind.JEEP,
 		UnitDB.Kind.IFV,
+		UnitDB.Kind.REPAIR_TRUCK,
 		UnitDB.Kind.TANK,
 		UnitDB.Kind.ARTILLERY,
 		UnitDB.Kind.SOLDIER_SQUAD,

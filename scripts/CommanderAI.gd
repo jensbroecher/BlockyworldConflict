@@ -37,6 +37,11 @@ func _command_units() -> void:
 	for u in mine:
 		if u.garrison_building:
 			continue
+		if u.is_repairer():
+			var wounded := _nearest_wounded_vehicle(u)
+			if wounded:
+				u.order_move(wounded.global_position, null, null)
+			continue
 		if bool(u.stats["can_garrison"]):
 			var b := _nearby_building(u)
 			if b:
@@ -87,6 +92,22 @@ func _nearest_enemy_to(pos: Vector3) -> Unit:
 	return best
 
 
+func _nearest_wounded_vehicle(repairer: Unit) -> Unit:
+	var best: Unit = null
+	var best_d := 70.0
+	for n in get_tree().get_nodes_in_group("units"):
+		var u := n as Unit
+		if u == null or u == repairer or u.owner_id != player_id or u.hp <= 0.0:
+			continue
+		if u.is_infantry() or u.hp >= u.max_hp - 1.0:
+			continue
+		var d := repairer.global_position.distance_to(u.global_position)
+		if d < best_d:
+			best_d = d
+			best = u
+	return best
+
+
 func _nearby_building(u: Unit) -> Building:
 	for n in get_tree().get_nodes_in_group("buildings"):
 		var b := n as Building
@@ -119,6 +140,8 @@ func _choose_kind(credits: int) -> int:
 		options.append(UnitDB.Kind.JEEP)
 	if credits >= 250:
 		options.append(UnitDB.Kind.IFV)
+	if credits >= 220:
+		options.append(UnitDB.Kind.REPAIR_TRUCK)
 	if credits >= 400:
 		options.append(UnitDB.Kind.TANK)
 	if credits >= 350:
@@ -134,6 +157,8 @@ func _choose_kind(credits: int) -> int:
 		return UnitDB.Kind.TANK
 	if options.has(UnitDB.Kind.IFV) and randf() < 0.3:
 		return UnitDB.Kind.IFV
+	if options.has(UnitDB.Kind.REPAIR_TRUCK) and randf() < 0.22:
+		return UnitDB.Kind.REPAIR_TRUCK
 	if options.has(UnitDB.Kind.SOLDIER_SQUAD) and randf() < 0.25:
 		return UnitDB.Kind.SOLDIER_SQUAD
 	return options[randi() % options.size()]

@@ -147,6 +147,43 @@ static func collapse_smoke(tree: SceneTree, pos: Vector3, height: float) -> void
 	tw.tween_callback(root.queue_free)
 
 
+static func repair_beam(tree: SceneTree, from: Vector3, to: Vector3) -> void:
+	if tree == null or tree.current_scene == null:
+		return
+	var n := MeshInstance3D.new()
+	var im := ImmediateMesh.new()
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(0.35, 1.0, 0.45)
+	m.emission_enabled = true
+	m.emission = Color(0.25, 0.95, 0.35)
+	m.emission_energy_multiplier = 2.4
+	im.surface_begin(Mesh.PRIMITIVE_LINES, m)
+	im.surface_add_vertex(from)
+	im.surface_add_vertex(to)
+	im.surface_end()
+	n.mesh = im
+	n.material_override = m
+	tree.current_scene.add_child(n)
+	var spark := CSGSphere3D.new()
+	spark.radius = 0.22
+	spark.position = to
+	var sm := StandardMaterial3D.new()
+	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sm.albedo_color = Color(0.5, 1.0, 0.55, 0.85)
+	sm.emission_enabled = true
+	sm.emission = Color(0.3, 1.0, 0.4)
+	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	spark.material = sm
+	tree.current_scene.add_child(spark)
+	var tw := tree.create_tween()
+	tw.tween_interval(0.12)
+	tw.tween_callback(func() -> void:
+		n.queue_free()
+		spark.queue_free()
+	)
+
+
 static func crush_puff(tree: SceneTree, pos: Vector3) -> void:
 	burst(tree, pos, Color(0.45, 0.28, 0.18))
 

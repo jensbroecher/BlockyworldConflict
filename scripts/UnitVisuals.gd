@@ -54,6 +54,8 @@ static func build(kind: int, owner_id: int) -> Node3D:
 			_jeep(root, team, dark, gun, rubber)
 		UnitDB.Kind.IFV:
 			_ifv(root, team, dark, gun, rubber)
+		UnitDB.Kind.REPAIR_TRUCK:
+			_repair(root, team, dark, gun, rubber)
 		UnitDB.Kind.TANK:
 			_tank(root, team, dark, gun, rubber)
 		UnitDB.Kind.ARTILLERY:
@@ -104,6 +106,24 @@ static func _ifv(root: Node3D, team: Color, dark: Color, gun: Color, rubber: Col
 	box(turret, Vector3.ZERO, Vector3(1.3, 0.55, 1.3), team.lightened(0.08), 0.3)
 	box(turret, Vector3(0, 0.05, 1.3), Vector3(0.18, 0.18, 2.2), gun, 0.7)
 	_treads(root, rubber, 2.0, 4.0, 0.55)
+
+
+static func _repair(root: Node3D, team: Color, dark: Color, gun: Color, rubber: Color) -> void:
+	var stripe := Color(0.92, 0.72, 0.12)
+	box(root, Vector3(0, 0.75, 0.1), Vector3(2.2, 0.9, 4.2), team)
+	box(root, Vector3(0, 1.25, 1.2), Vector3(2.0, 0.85, 1.6), dark) # cab
+	box(root, Vector3(0, 1.35, -0.9), Vector3(1.9, 0.7, 2.0), stripe, 0.05) # workshop
+	box(root, Vector3(0.7, 1.85, -0.9), Vector3(0.35, 0.35, 0.35), Color(0.2, 0.2, 0.22))
+	var crane := Node3D.new()
+	crane.name = "Turret"
+	crane.position = Vector3(0, 1.85, -0.5)
+	root.add_child(crane)
+	box(crane, Vector3(0, 0.15, 0), Vector3(0.35, 0.35, 0.35), stripe)
+	box(crane, Vector3(0, 0.55, 0.15), Vector3(0.22, 1.1, 0.22), dark)
+	box(crane, Vector3(0, 1.05, 0.7), Vector3(0.18, 0.18, 1.4), gun, 0.4)
+	box(crane, Vector3(0, 0.7, 1.35), Vector3(0.12, 0.55, 0.12), stripe)
+	box(root, Vector3(0, 1.55, 1.2), Vector3(0.15, 0.12, 1.1), gun, 0.5) # light MG
+	_wheels(root, rubber, 1.05, 1.35)
 
 
 static func _tank(root: Node3D, team: Color, dark: Color, gun: Color, rubber: Color) -> void:

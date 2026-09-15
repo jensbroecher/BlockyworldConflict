@@ -146,7 +146,7 @@ func _build_preview() -> void:
 	cam.look_at(Vector3(0, 1, 0))
 	_preview_root = Node3D.new()
 	world.add_child(_preview_root)
-	var kinds := [UnitDB.Kind.TANK, UnitDB.Kind.HELICOPTER, UnitDB.Kind.IFV, UnitDB.Kind.SOLDIER_SQUAD, UnitDB.Kind.MLRS]
+	var kinds := [UnitDB.Kind.TANK, UnitDB.Kind.HELICOPTER, UnitDB.Kind.REPAIR_TRUCK, UnitDB.Kind.IFV, UnitDB.Kind.SOLDIER_SQUAD, UnitDB.Kind.MLRS]
 	for i in kinds.size():
 		var vis: Node3D = UnitVisuals.build(kinds[i], 1 if i % 2 == 0 else 2)
 		vis.position = Vector3(-8 + i * 4.2, 0, 0)

@@ -34,6 +34,7 @@ var _acquire_t: float = 0.0
 var _crashing: bool = false
 var _crash_spin: Vector3 = Vector3.ZERO
 var _pop_turret_on_wreck: bool = false
+var _repair_fx_t: float = 0.0
 
 
 func setup(p_kind: int, p_owner: int) -> void:
@@ -123,6 +124,10 @@ func is_infantry() -> bool:
 
 func is_vehicle() -> bool:
 	return not is_air() and not is_infantry()
+
+
+func is_repairer() -> bool:
+	return float(stats.get("repair_rate", 0.0)) > 0.0
 
 
 func aim_point() -> Vector3:
@@ -252,8 +257,9 @@ func _server_sim(delta: float) -> void:
 		_try_shoot(delta)
 		return
 	_try_enter_garrison()
+	var repairing := _try_repair(delta)
 	var shooting := _try_shoot(delta)
-	if not shooting:
+	if repairing or not shooting:
 		_follow_path(delta)
 	else:
 		velocity.x = 0.0
@@ -507,6 +513,54 @@ func _deal_to_unit(u: Unit) -> void:
 @rpc("authority", "call_local", "unreliable")
 func _rpc_shot_fx(from: Vector3, to: Vector3) -> void:
 	Fx.tracer(get_tree(), from, to, GameSession.color_of(owner_id).lightened(0.4))
+
+
+func receive_repair(amount: float) -> void:
+	if hp <= 0.0 or amount <= 0.0 or hp >= max_hp:
+		return
+	if not GameSession.is_server():
+		return
+	hp = minf(max_hp, hp + amount)
+
+
+func _try_repair(delta: float) -> bool:
+	if not is_repairer() or hp <= 0.0:
+		return false
+	var radius := float(stats.get("repair_range", 12.0))
+	var rate := float(stats.get("repair_rate", 0.0))
+	var best: Unit = null
+	var best_need := 0.0
+	for n in get_tree().get_nodes_in_group("units"):
+		var u := n as Unit
+		if u == null or u == self or u.owner_id != owner_id or u.hp <= 0.0:
+			continue
+		if u.is_infantry():
+			continue
+		if u.hp >= u.max_hp - 0.05:
+			continue
+		var d := global_position.distance_to(u.global_position)
+		if d > radius:
+			continue
+		var need := u.max_hp - u.hp
+		if need > best_need:
+			best_need = need
+			best = u
+	if best == null:
+		return false
+	best.receive_repair(rate * delta)
+	_repair_fx_t -= delta
+	if _repair_fx_t <= 0.0:
+		_repair_fx_t = 0.12
+		rpc("_rpc_repair_fx", best.get_path())
+	return true
+
+
+@rpc("authority", "call_local", "unreliable")
+func _rpc_repair_fx(target_path: NodePath) -> void:
+	var t := get_node_or_null(target_path) as Unit
+	if t == null:
+		return
+	Fx.repair_beam(get_tree(), aim_point() + Vector3(0, 0.8, 0), t.aim_point())
 
 
 func take_damage(amount: float, _from_owner: int) -> void:
