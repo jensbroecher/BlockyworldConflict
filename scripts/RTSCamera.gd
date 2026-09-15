@@ -29,6 +29,11 @@ func focus(pos: Vector3) -> void:
 	_apply()
 
 
+func pan_to(pos: Vector3) -> void:
+	global_position = Vector3(pos.x, 0.0, pos.z)
+	_apply()
+
+
 func _process(delta: float) -> void:
 	if cam and not cam.current:
 		cam.make_current()

@@ -13,6 +13,9 @@ var _spawn_queue: Array[Dictionary] = []
 var _hold_win := 0.0
 var _sync_t := 0.0
 var _region_t := 0.0
+var groups: Dictionary = {} ## 0-9 -> Array[Unit]
+var _last_group_key := -1
+var _last_group_time := 0.0
 
 
 func _ready() -> void:
@@ -150,6 +153,8 @@ func _process(delta: float) -> void:
 	var inc := UnitDB.BASE_INCOME + float(owned) * UnitDB.REGION_INCOME
 	hud.refresh(GameSession.get_credits(GameSession.local_id), owned, map.regions.size(), inc, selected)
 	_prune_selected()
+	_prune_groups()
+	hud.set_group_hint(_group_hint())
 
 
 func _tick_economy(delta: float) -> void:
@@ -261,6 +266,7 @@ func _rpc_credits(id_a: int, c_a: float, id_b: int, c_b: float) -> void:
 
 func _on_unit_died(u: Unit) -> void:
 	selected.erase(u)
+	_prune_groups()
 
 
 func _prune_selected() -> void:
@@ -289,6 +295,26 @@ func _unhandled_input(event: InputEvent) -> void:
 		for u in selected:
 			u.order_stop()
 		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		var gi := _group_index(event)
+		if gi >= 0:
+			if event.ctrl_pressed:
+				if event.shift_pressed:
+					_add_to_group(gi)
+				else:
+					_assign_group(gi)
+			elif event.shift_pressed:
+				_select_group(gi, true)
+			else:
+				var now := Time.get_ticks_msec() / 1000.0
+				var jump := gi == _last_group_key and (now - _last_group_time) <= 0.35
+				_select_group(gi, false)
+				if jump:
+					_jump_to_group(gi)
+				_last_group_key = gi
+				_last_group_time = now
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
@@ -354,6 +380,84 @@ func _add_select(u: Unit) -> void:
 		return
 	u.selected = true
 	selected.append(u)
+
+
+func _group_index(event: InputEventKey) -> int:
+	var k := event.physical_keycode
+	if k >= KEY_0 and k <= KEY_9:
+		return int(k) - int(KEY_0)
+	if k >= KEY_KP_0 and k <= KEY_KP_9:
+		return int(k) - int(KEY_KP_0)
+	return -1
+
+
+func _living(units: Array) -> Array[Unit]:
+	var out: Array[Unit] = []
+	for u in units:
+		if is_instance_valid(u) and u is Unit and (u as Unit).hp > 0.0 and (u as Unit).owner_id == GameSession.local_id:
+			out.append(u as Unit)
+	return out
+
+
+func _prune_groups() -> void:
+	for k in groups.keys():
+		groups[k] = _living(groups[k])
+		if (groups[k] as Array).is_empty():
+			groups.erase(k)
+
+
+func _assign_group(index: int) -> void:
+	_prune_selected()
+	if selected.is_empty():
+		return
+	groups[index] = selected.duplicate()
+
+
+func _add_to_group(index: int) -> void:
+	_prune_selected()
+	if selected.is_empty():
+		return
+	var bag: Array[Unit] = _living(groups.get(index, []))
+	for u in selected:
+		if not bag.has(u):
+			bag.append(u)
+	groups[index] = bag
+
+
+func _select_group(index: int, additive: bool) -> void:
+	_prune_groups()
+	var bag: Array[Unit] = _living(groups.get(index, []))
+	if bag.is_empty():
+		return
+	if not additive:
+		_clear_select()
+	for u in bag:
+		_add_select(u)
+
+
+func _group_hint() -> String:
+	if groups.is_empty():
+		return ""
+	var keys: Array = groups.keys()
+	keys.sort()
+	var bits: PackedStringArray = []
+	for k in keys:
+		var n: int = _living(groups[k]).size()
+		if n > 0:
+			bits.append("%d:%d" % [int(k), n])
+	if bits.is_empty():
+		return ""
+	return "Groups  " + "   ".join(bits)
+
+
+func _jump_to_group(index: int) -> void:
+	var bag: Array[Unit] = _living(groups.get(index, []))
+	if bag.is_empty() or camera == null:
+		return
+	var acc := Vector3.ZERO
+	for u in bag:
+		acc += u.global_position
+	camera.pan_to(acc / float(bag.size()))
 
 
 func _issue_command() -> void:

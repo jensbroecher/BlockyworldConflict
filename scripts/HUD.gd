@@ -12,6 +12,7 @@ var _regions: Label
 var _income: Label
 var _select_info: Label
 var _help: Label
+var _groups_lbl: Label
 var _banner: Label
 var _minimap: Control
 var _box: ColorRect
@@ -34,10 +35,15 @@ func _ready() -> void:
 	root.add_child(_select_info)
 	_help = Label.new()
 	_help.position = Vector2(20, 70)
-	_help.text = "LMB select  ·  drag box  ·  RMB move/attack  ·  G garrison/unload  ·  H stop  ·  B shop  ·  WASD camera"
+	_help.text = "LMB select  ·  RMB move/attack  ·  Ctrl+1-9 group  ·  1-9 select  ·  double-tap jump  ·  G garrison  ·  H stop  ·  B shop"
 	_help.add_theme_font_size_override("font_size", 14)
 	_help.add_theme_color_override("font_color", Color(0.8, 0.85, 0.7, 0.8))
 	root.add_child(_help)
+	_groups_lbl = Label.new()
+	_groups_lbl.position = Vector2(20, 92)
+	_groups_lbl.add_theme_font_size_override("font_size", 14)
+	_groups_lbl.add_theme_color_override("font_color", Color(0.85, 0.88, 0.55, 0.9))
+	root.add_child(_groups_lbl)
 	_banner = Label.new()
 	_banner.set_anchors_preset(Control.PRESET_CENTER)
 	_banner.offset_left = -400
@@ -158,6 +164,11 @@ func refresh(credits: int, owned: int, total: int, income: float, selected: Arra
 			", ".join(bits), hp_sum, hp_max, extra
 		]
 	_minimap.queue_redraw()
+
+
+func set_group_hint(text: String) -> void:
+	if _groups_lbl:
+		_groups_lbl.text = text
 
 
 func show_winner(text: String, color: Color) -> void:
