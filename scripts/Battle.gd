@@ -277,7 +277,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if hud.over_ui or hud._shop.visible:
 		return
 	if event.is_action_pressed("garrison"):
-		_order_garrison()
+		if _any_garrisoned():
+			_order_unload()
+		else:
+			_order_garrison()
 		return
 	if event.is_action_pressed("stop"):
 		for u in selected:
@@ -314,7 +317,7 @@ func _finish_box(end: Vector2, additive: bool) -> void:
 
 
 func _click_select(additive: bool) -> void:
-	var hit := camera.ray_query(2)
+	var hit := camera.ray_query(2 | 8)
 	var u: Unit = null
 	if hit and hit.collider is Unit:
 		u = hit.collider as Unit
@@ -322,7 +325,17 @@ func _click_select(additive: bool) -> void:
 		if not additive:
 			_clear_select()
 		_add_select(u)
-	elif not additive:
+		return
+	if hit and hit.collider is Building:
+		var b := hit.collider as Building
+		if b.owner_id == GameSession.local_id and not b.occupants.is_empty():
+			if not additive:
+				_clear_select()
+			for occ in b.occupants:
+				if is_instance_valid(occ):
+					_add_select(occ)
+			return
+	if not additive:
 		_clear_select()
 
 
@@ -365,6 +378,19 @@ func _any_can_garrison() -> bool:
 		if bool(u.stats.get("can_garrison", false)):
 			return true
 	return false
+
+
+func _any_garrisoned() -> bool:
+	for u in selected:
+		if is_instance_valid(u) and u.garrison_building != null:
+			return true
+	return false
+
+
+func _order_unload() -> void:
+	for u in selected:
+		if is_instance_valid(u) and u.garrison_building != null:
+			u.order_unload()
 
 
 func _order_move(dest: Vector3, enemy: Unit) -> void:

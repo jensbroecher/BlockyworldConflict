@@ -19,6 +19,7 @@ var path_i: int = 0
 var attack_target: Unit = null
 var garrison_building: Building = null
 var pending_garrison: Building = null
+var _move_priority: bool = false
 
 var _visual: Node3D
 var _sel: MeshInstance3D
@@ -42,6 +43,7 @@ func setup(p_kind: int, p_owner: int) -> void:
 	collision_layer = 2
 	collision_mask = 1 | 8 | 16
 	floor_max_angle = deg_to_rad(55.0)
+	floor_snap_length = 0.45
 	var ext: Vector3 = stats["extent"]
 	var col := CollisionShape3D.new()
 	col.name = "CollisionShape3D"
@@ -160,6 +162,8 @@ func _apply_order(dest: Vector3, target: Unit, garrison: Building) -> void:
 		_leave_garrison()
 	attack_target = target
 	pending_garrison = garrison
+	# Ground click (no attack target) must be allowed to walk away from a fight.
+	_move_priority = target == null and garrison == null
 	if is_air():
 		path = PackedVector3Array([Vector3(dest.x, float(stats["fly_height"]), dest.z)])
 		path_i = 0
@@ -179,6 +183,7 @@ func order_stop() -> void:
 	path = PackedVector3Array()
 	attack_target = null
 	pending_garrison = null
+	_move_priority = false
 
 
 @rpc("any_peer", "reliable")
@@ -190,6 +195,7 @@ func _rpc_stop() -> void:
 	path = PackedVector3Array()
 	attack_target = null
 	pending_garrison = null
+	_move_priority = false
 
 
 func _physics_process(delta: float) -> void:
@@ -249,6 +255,7 @@ func _follow_path(delta: float) -> void:
 				_look_xz(dest)
 		else:
 			global_position.y = move_toward(global_position.y, target_y, 6.0 * delta)
+			_move_priority = false
 		return
 	if path_i < path.size():
 		var dest: Vector3 = path[path_i]
@@ -263,6 +270,7 @@ func _follow_path(delta: float) -> void:
 	else:
 		velocity.x = 0
 		velocity.z = 0
+		_move_priority = false
 	if not is_on_floor():
 		velocity.y -= 22.0 * delta
 	else:
@@ -294,7 +302,8 @@ func _try_shoot(_delta: float) -> bool:
 	_acquire_t -= _delta
 	if not is_instance_valid(attack_target) or attack_target.hp <= 0.0:
 		attack_target = null
-	if attack_target == null and _acquire_t <= 0.0:
+	var following_move := _move_priority and path_i < path.size()
+	if attack_target == null and not following_move and _acquire_t <= 0.0:
 		_acquire_t = 0.35
 		attack_target = _acquire_enemy()
 	if attack_target == null:
@@ -306,7 +315,7 @@ func _try_shoot(_delta: float) -> bool:
 	var minr: float = float(stats["min_range"])
 	_aim_turret(aim)
 	if dist > rng:
-		if path_i >= path.size() and garrison_building == null:
+		if not following_move and path_i >= path.size() and garrison_building == null:
 			_apply_order(attack_target.global_position, attack_target, null)
 		return false
 	if dist < minr:
@@ -315,7 +324,8 @@ func _try_shoot(_delta: float) -> bool:
 		return false
 	if _cooldown <= 0.0:
 		_fire(origin, aim)
-	return true
+	# Keep walking if the player ordered a move; otherwise stop to fire.
+	return not following_move
 
 
 func _aim_turret(aim: Vector3) -> void:
@@ -486,7 +496,7 @@ func _enter_garrison(b: Building) -> void:
 func _leave_garrison() -> void:
 	if garrison_building and is_instance_valid(garrison_building):
 		garrison_building.vacate(self)
-		global_position = garrison_building.global_position + Vector3(3.5, 0, 0)
+		global_position = garrison_building.global_position + Vector3(3.5, 0.08, 0)
 	garrison_building = null
 	visible = true
 	var cs := get_node_or_null("CollisionShape3D") as CollisionShape3D
@@ -497,6 +507,43 @@ func _leave_garrison() -> void:
 func eject_from_building(damage: float) -> void:
 	_leave_garrison()
 	take_damage(damage, 0)
+
+
+func order_unload() -> void:
+	if not GameSession.is_server():
+		rpc_id(1, "_rpc_unload")
+		return
+	_do_unload()
+
+
+@rpc("any_peer", "reliable")
+func _rpc_unload() -> void:
+	if not GameSession.is_server():
+		return
+	if multiplayer.get_remote_sender_id() != owner_id and multiplayer.get_remote_sender_id() != 0:
+		return
+	_do_unload()
+
+
+func _do_unload() -> void:
+	if garrison_building == null or not is_instance_valid(garrison_building):
+		return
+	var origin := garrison_building.global_position
+	_leave_garrison()
+	var a := randf() * TAU
+	var dest := origin + Vector3(cos(a), 0.0, sin(a)) * 4.5
+	dest.y = 0.08
+	global_position = dest
+	_move_priority = true
+	attack_target = null
+	pending_garrison = null
+	var pf := get_tree().get_first_node_in_group("pathfinder") as Pathfinder
+	if pf and not is_air():
+		path = pf.find_path(global_position, dest + Vector3(cos(a), 0.0, sin(a)) * 2.0)
+		path_i = 0
+	else:
+		path = PackedVector3Array()
+		path_i = 0
 
 
 func _spin_rotors(delta: float) -> void:

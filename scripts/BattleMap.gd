@@ -58,41 +58,62 @@ func _environment() -> void:
 
 
 func _ground_and_river() -> void:
+	var land_w := MAP_HALF - RIVER_HALF
+	_add_ground_plate(-(RIVER_HALF + land_w * 0.5), land_w)
+	_add_ground_plate(RIVER_HALF + land_w * 0.5, land_w)
+	# Visible trench of water between the two banks (opaque — mobile CSG alpha was invisible).
+	var water := MeshInstance3D.new()
+	var wmesh := BoxMesh.new()
+	wmesh.size = Vector3(RIVER_HALF * 2.0, 1.6, MAP_HALF * 2.0)
+	water.mesh = wmesh
+	water.position = Vector3(0, -1.0, 0) # surface at y=-0.2, below the banks
+	var wm := StandardMaterial3D.new()
+	wm.albedo_color = Color(0.12, 0.42, 0.72)
+	wm.metallic = 0.35
+	wm.roughness = 0.18
+	wm.emission_enabled = true
+	wm.emission = Color(0.05, 0.18, 0.32)
+	wm.emission_energy_multiplier = 0.45
+	water.material_override = wm
+	add_child(water)
+	var bed := MeshInstance3D.new()
+	var bmesh := BoxMesh.new()
+	bmesh.size = Vector3(RIVER_HALF * 2.0 + 0.4, 0.4, MAP_HALF * 2.0)
+	bed.mesh = bmesh
+	bed.position = Vector3(0, -1.7, 0)
+	bed.material_override = UnitVisuals.mat(Color(0.22, 0.28, 0.18), 0.0, 0.95)
+	add_child(bed)
+	for sx in [-1.0, 1.0]:
+		var bank := CSGBox3D.new()
+		bank.size = Vector3(2.6, 0.7, MAP_HALF * 2.0)
+		bank.position = Vector3(sx * (RIVER_HALF + 0.4), -0.12, 0)
+		bank.material = UnitVisuals.mat(Color(0.48, 0.40, 0.26), 0.0, 0.95)
+		add_child(bank)
+		var foam := MeshInstance3D.new()
+		var fmesh := BoxMesh.new()
+		fmesh.size = Vector3(0.55, 0.08, MAP_HALF * 2.0)
+		foam.mesh = fmesh
+		foam.position = Vector3(sx * (RIVER_HALF - 0.2), -0.16, 0)
+		foam.material_override = UnitVisuals.mat(Color(0.55, 0.78, 0.88), 0.0, 0.4)
+		add_child(foam)
+
+
+func _add_ground_plate(center_x: float, width: float) -> void:
 	var ground := StaticBody3D.new()
 	ground.collision_layer = 1
 	var gcol := CollisionShape3D.new()
 	var gbox := BoxShape3D.new()
-	gbox.size = Vector3(MAP_HALF * 2.0, 2.0, MAP_HALF * 2.0)
+	gbox.size = Vector3(width, 2.0, MAP_HALF * 2.0)
 	gcol.shape = gbox
 	gcol.position.y = -1.0
 	ground.add_child(gcol)
+	ground.position.x = center_x
 	var gmesh := CSGBox3D.new()
-	gmesh.size = Vector3(MAP_HALF * 2.0, 2.0, MAP_HALF * 2.0)
+	gmesh.size = Vector3(width, 2.0, MAP_HALF * 2.0)
 	gmesh.position.y = -1.0
 	gmesh.material = UnitVisuals.mat(Color(0.40, 0.55, 0.28), 0.0, 0.95)
 	ground.add_child(gmesh)
 	add_child(ground)
-	# River visual (no walk collision; pathfinder blocks it).
-	var water := CSGBox3D.new()
-	water.size = Vector3(RIVER_HALF * 2.0, 0.6, MAP_HALF * 2.0)
-	water.position = Vector3(0, -0.35, 0)
-	var wm := StandardMaterial3D.new()
-	wm.albedo_color = Color(0.18, 0.42, 0.62, 0.85)
-	wm.metallic = 0.3
-	wm.roughness = 0.15
-	wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	water.material = wm
-	add_child(water)
-	var banks := [
-		Vector3(-RIVER_HALF - 1.2, -0.05, 0),
-		Vector3(RIVER_HALF + 1.2, -0.05, 0),
-	]
-	for p in banks:
-		var bank := CSGBox3D.new()
-		bank.size = Vector3(2.4, 0.5, MAP_HALF * 2.0)
-		bank.position = p
-		bank.material = UnitVisuals.mat(Color(0.45, 0.40, 0.28), 0.0, 0.95)
-		add_child(bank)
 
 
 func _hills() -> void:
@@ -121,29 +142,29 @@ func _bridges() -> void:
 	for z in [-40.0, 40.0]:
 		var body := StaticBody3D.new()
 		body.collision_layer = 1
+		body.position = Vector3(0, 0, z)
+		# Floor-height collision so units walk across instead of hitting a wall.
 		var col := CollisionShape3D.new()
 		var box := BoxShape3D.new()
-		box.size = Vector3(RIVER_HALF * 2.0 + 6.0, 0.7, 8.0)
+		box.size = Vector3(RIVER_HALF * 2.0 + 8.0, 1.0, 12.0)
 		col.shape = box
-		col.position.y = 0.15
+		col.position.y = -0.5
 		body.add_child(col)
-		body.position = Vector3(0, 0, z)
 		var deck := CSGBox3D.new()
-		deck.size = Vector3(RIVER_HALF * 2.0 + 6.0, 0.5, 8.0)
-		deck.position.y = 0.15
+		deck.size = Vector3(RIVER_HALF * 2.0 + 8.0, 0.35, 11.0)
+		deck.position.y = 0.05
 		deck.material = UnitVisuals.mat(Color(0.42, 0.32, 0.22), 0.05, 0.8)
 		body.add_child(deck)
-		for x in [-1.0, 1.0]:
+		for side in [-1.0, 1.0]:
 			var rail := CSGBox3D.new()
-			rail.size = Vector3(RIVER_HALF * 2.0 + 6.0, 0.7, 0.25)
-			rail.position = Vector3(0, 0.7, x * 3.7)
+			rail.size = Vector3(RIVER_HALF * 2.0 + 8.0, 0.85, 0.28)
+			rail.position = Vector3(0, 0.55, side * 5.4)
 			rail.material = UnitVisuals.mat(Color(0.3, 0.22, 0.16), 0.1, 0.7)
 			body.add_child(rail)
-		# Plank stripes
-		for i in 7:
+		for i in 8:
 			var plank := CSGBox3D.new()
-			plank.size = Vector3(2.0, 0.12, 7.6)
-			plank.position = Vector3(-10 + i * 3.4, 0.42, 0)
+			plank.size = Vector3(2.2, 0.1, 10.4)
+			plank.position = Vector3(-12.0 + i * 3.4, 0.24, 0)
 			plank.material = UnitVisuals.mat(Color(0.5, 0.38, 0.24), 0.05, 0.75)
 			body.add_child(plank)
 		add_child(body)
@@ -162,8 +183,8 @@ func _setup_pathfinder() -> void:
 	)
 	for z in [-40.0, 40.0]:
 		pathfinder.set_blocked_rect(
-			Vector2(-RIVER_HALF - 1.0, z - 4.5),
-			Vector2(RIVER_HALF + 1.0, z + 4.5),
+			Vector2(-RIVER_HALF - 3.0, z - 6.5),
+			Vector2(RIVER_HALF + 3.0, z + 6.5),
 			false
 		)
 	for h in _hill_blockers:
@@ -195,11 +216,17 @@ func _regions() -> void:
 				"center": center,
 				"owner": 0,
 			})
+			var vis_min_x: float = mn.x
+			var vis_max_x: float = mx.x
+			if vis_max_x > -RIVER_HALF and vis_min_x < -RIVER_HALF:
+				vis_max_x = minf(vis_max_x, -RIVER_HALF - 0.6)
+			if vis_min_x < RIVER_HALF and vis_max_x > RIVER_HALF:
+				vis_min_x = maxf(vis_min_x, RIVER_HALF + 0.6)
 			var overlay := MeshInstance3D.new()
 			var quad := PlaneMesh.new()
-			quad.size = Vector2(mx.x - mn.x - 1.0, mx.y - mn.y - 1.0)
+			quad.size = Vector2(vis_max_x - vis_min_x - 1.0, mx.y - mn.y - 1.0)
 			overlay.mesh = quad
-			overlay.position = Vector3(center.x, 0.04, center.z)
+			overlay.position = Vector3((vis_min_x + vis_max_x) * 0.5, 0.04, center.z)
 			overlay.name = "RegionTint_%s" % id
 			var mat := StandardMaterial3D.new()
 			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED

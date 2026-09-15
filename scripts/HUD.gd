@@ -34,7 +34,7 @@ func _ready() -> void:
 	root.add_child(_select_info)
 	_help = Label.new()
 	_help.position = Vector2(20, 70)
-	_help.text = "LMB select  ·  drag box  ·  RMB move/attack  ·  G garrison  ·  H stop  ·  B shop  ·  WASD camera"
+	_help.text = "LMB select  ·  drag box  ·  RMB move/attack  ·  G garrison/unload  ·  H stop  ·  B shop  ·  WASD camera"
 	_help.add_theme_font_size_override("font_size", 14)
 	_help.add_theme_color_override("font_color", Color(0.8, 0.85, 0.7, 0.8))
 	root.add_child(_help)
@@ -147,8 +147,15 @@ func refresh(credits: int, owned: int, total: int, income: float, selected: Arra
 		var bits: PackedStringArray = []
 		for k in counts.keys():
 			bits.append("%dx %s" % [counts[k], UnitDB.data(int(k))["name"]])
-		_select_info.text = "Selected: %s\nHP %.0f / %.0f   ·   G to seize a building" % [
-			", ".join(bits), hp_sum, hp_max
+		var garrisoned := 0
+		for u2 in selected:
+			if is_instance_valid(u2) and u2.garrison_building:
+				garrisoned += 1
+		var extra := "G to seize a building"
+		if garrisoned > 0:
+			extra = "G to unload from building  ·  RMB ground also ejects"
+		_select_info.text = "Selected: %s\nHP %.0f / %.0f   ·   %s" % [
+			", ".join(bits), hp_sum, hp_max, extra
 		]
 	_minimap.queue_redraw()
 
